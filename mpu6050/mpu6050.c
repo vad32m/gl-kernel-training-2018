@@ -3,6 +3,7 @@
 #include <linux/device.h>
 #include <linux/err.h>
 #include <linux/i2c.h>
+#include <linux/timer.h>
 #include <linux/i2c-dev.h>
 
 #include "mpu6050-regs.h"
@@ -15,7 +16,11 @@ struct mpu6050_data {
 	int temperature;
 };
 
+static struct timer_list data_upd_timer;
+
 static struct mpu6050_data g_mpu6050_data;
+
+static const unsigned long upd_period_ms = 5;
 
 static int mpu6050_read_data(void)
 {
@@ -125,8 +130,6 @@ static struct i2c_driver mpu6050_i2c_driver = {
 static ssize_t accel_x_show(struct class *class,
 			    struct class_attribute *attr, char *buf)
 {
-	mpu6050_read_data();
-
 	sprintf(buf, "%d\n", g_mpu6050_data.accel_values[0]);
 	return strlen(buf);
 }
@@ -134,8 +137,6 @@ static ssize_t accel_x_show(struct class *class,
 static ssize_t accel_y_show(struct class *class,
 			    struct class_attribute *attr, char *buf)
 {
-	mpu6050_read_data();
-
 	sprintf(buf, "%d\n", g_mpu6050_data.accel_values[1]);
 	return strlen(buf);
 }
@@ -143,8 +144,6 @@ static ssize_t accel_y_show(struct class *class,
 static ssize_t accel_z_show(struct class *class,
 			    struct class_attribute *attr, char *buf)
 {
-	mpu6050_read_data();
-
 	sprintf(buf, "%d\n", g_mpu6050_data.accel_values[2]);
 	return strlen(buf);
 }
@@ -152,8 +151,6 @@ static ssize_t accel_z_show(struct class *class,
 static ssize_t gyro_x_show(struct class *class,
 			   struct class_attribute *attr, char *buf)
 {
-	mpu6050_read_data();
-
 	sprintf(buf, "%d\n", g_mpu6050_data.gyro_values[0]);
 	return strlen(buf);
 }
@@ -161,8 +158,6 @@ static ssize_t gyro_x_show(struct class *class,
 static ssize_t gyro_y_show(struct class *class,
 			   struct class_attribute *attr, char *buf)
 {
-	mpu6050_read_data();
-
 	sprintf(buf, "%d\n", g_mpu6050_data.gyro_values[1]);
 	return strlen(buf);
 }
@@ -170,8 +165,6 @@ static ssize_t gyro_y_show(struct class *class,
 static ssize_t gyro_z_show(struct class *class,
 			   struct class_attribute *attr, char *buf)
 {
-	mpu6050_read_data();
-
 	sprintf(buf, "%d\n", g_mpu6050_data.gyro_values[2]);
 	return strlen(buf);
 }
@@ -179,8 +172,6 @@ static ssize_t gyro_z_show(struct class *class,
 static ssize_t temp_show(struct class *class,
 			 struct class_attribute *attr, char *buf)
 {
-	mpu6050_read_data();
-
 	sprintf(buf, "%d\n", g_mpu6050_data.temperature);
 	return strlen(buf);
 }
@@ -192,6 +183,12 @@ CLASS_ATTR(gyro_x, 0444, &gyro_x_show, NULL);
 CLASS_ATTR(gyro_y, 0444, &gyro_y_show, NULL);
 CLASS_ATTR(gyro_z, 0444, &gyro_z_show, NULL);
 CLASS_ATTR(temperature, 0444, &temp_show, NULL);
+
+void mpu_data_upd_callback(unsigned long data)
+{
+	mpu6050_read_data();
+	mod_timer(&data_upd_timer, jiffies + msecs_to_jiffies(upd_period_ms));
+}
 
 static struct class *attr_class;
 
@@ -258,8 +255,11 @@ static int mpu6050_init(void)
 		pr_err("mpu6050: failed to create sysfs class attribute temperature: %d\n", ret);
 		return ret;
 	}
-
+	
 	pr_info("mpu6050: sysfs class attributes created\n");
+
+	init_timer(&data_upd_timer);
+	mod_timer(&data_upd_timer, jiffies + msecs_to_jiffies(upd_period_ms));
 
 	pr_info("mpu6050: module loaded\n");
 	return 0;
@@ -280,6 +280,8 @@ static void mpu6050_exit(void)
 		class_destroy(attr_class);
 		pr_info("mpu6050: sysfs class destroyed\n");
 	}
+
+	del_timer(&data_upd_timer);
 
 	i2c_del_driver(&mpu6050_i2c_driver);
 	pr_info("mpu6050: i2c driver deleted\n");
